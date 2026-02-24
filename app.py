@@ -1,18 +1,3 @@
-# ============================================================
-#  PERSONAL NATAL ASPECT SCORER — Streamlit App
-#
-#  For individuals rather than stocks.
-#  No price data — only planetary aspect scores plotted over time.
-#
-#  Ephemeris loaded from GitHub (planet_degrees.csv)
-#  User inputs: birth date, date range to display, forecast days, orbs
-#  Outputs:
-#    Chart 1 — Natal score (transit vs natal chart) over time
-#    Chart 2 — Transit score (transit vs transit) over time
-#    Chart 3 — Cumulative scores over time
-#    Table 1 — Recent + upcoming natal aspects with scores
-#    Table 2 — Recent + upcoming transit aspects with scores
-# ============================================================
 
 import warnings, datetime, itertools
 warnings.filterwarnings('ignore')
