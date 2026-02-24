@@ -58,7 +58,7 @@ st.markdown("""
 
 GITHUB_EPH_URL = (
     "https://raw.githubusercontent.com/"
-    "YOUR_USERNAME/YOUR_REPO/main/planet_degrees.csv"
+    "goncuahm/kozmikharita/main/planet_degrees.csv"
     # ↑ Replace with your actual GitHub raw URL
 )
 
