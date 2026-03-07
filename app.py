@@ -1,4 +1,3 @@
-
 import warnings, datetime, itertools
 warnings.filterwarnings('ignore')
 
@@ -49,6 +48,7 @@ st.markdown("""
   div[data-testid="stMetric"] label { color: #C8A84B !important; }
   .stTabs [data-baseweb="tab"] { color: #E8E8F4; }
   .stTabs [aria-selected="true"] { color: #C8A84B !important; border-bottom-color: #C8A84B !important; }
+  .stCheckbox > label { color: #E8E8F4 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,7 +59,6 @@ st.markdown("""
 GITHUB_EPH_URL = (
     "https://raw.githubusercontent.com/"
     "goncuahm/kozmikharita/main/planet_degrees.csv"
-    # ↑ Replace with your actual GitHub raw URL
 )
 
 @st.cache_data(show_spinner="Loading ephemeris from GitHub …")
@@ -82,28 +81,51 @@ ASP_NAMES = {0:'Conj', 60:'Sext', 90:'Sqr', 120:'Trine', 180:'Opp'}
 SIGNS     = ['Aries','Taurus','Gemini','Cancer','Leo','Virgo',
              'Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces']
 
-PLANET_WEIGHT = {
-    'sun':       +1.5,
-    'moon':      +1.0,
-    'mercury':   +0.5,
-    'venus':     +2.0,
-    'mars':      -1.5,
-    'jupiter':   +3.0,
-    'saturn':    -2.5,
-    'uranus':    -0.5,
-    'neptune':   +0.5,
-    'pluto':     -1.0,
-    'true_node': +0.5,
-    'mean_node': +0.5,
+# ── SCORING: consistent with trading app ────────────────────
+
+# Planet POTENCY: always positive — how strongly the planet expresses any aspect.
+PLANET_POTENCY = {
+    'jupiter':   3.0,
+    'venus':     2.0,
+    'sun':       1.5,
+    'moon':      1.0,
+    'mars':      2.0,
+    'saturn':    2.5,
+    'pluto':     1.5,
+    'mercury':   0.5,
+    'neptune':   0.5,
+    'uranus':    0.5,
+    'true_node': 0.5,
+    'mean_node': 0.5,
 }
 
-ASPECT_MULT = {
-    0:   +1.0,
+# Planet NATURE: +1 = benefic, -1 = malefic, 0 = neutral
+PLANET_NATURE = {
+    'jupiter':   +1,
+    'venus':     +1,
+    'sun':       +1,
+    'moon':      +1,
+    'neptune':   +1,
+    'true_node': +1,
+    'mean_node': +1,
+    'mercury':    0,
+    'mars':      -1,
+    'saturn':    -1,
+    'uranus':    -1,
+    'pluto':     -1,
+}
+
+# Base aspect polarity: positive = harmonious, negative = tense
+ASPECT_BASE = {
+    0:    0.0,
     60:  +1.5,
     90:  -1.8,
     120: +2.0,
     180: -1.5,
 }
+
+# Nature modulation factor
+NATURE_MOD = 0.35
 
 PHASE_FACTOR = {'apply': 1.0, 'sep': 0.6}
 
@@ -112,6 +134,22 @@ BG     = '#0A0A1A';  PANEL  = '#0D0D28';  GOLD   = '#C8A84B'
 TEAL   = '#00D4B4';  WHITE  = '#E8E8F4';  GREY   = '#2A2A4A'
 GREEN  = '#44DD88';  RED    = '#E84040';  ORANGE = '#FF8844'
 PURPLE = '#CC44FF';  BLUE   = '#4488FF'
+
+# Planet display symbols for sidebar
+PLANET_SYMBOLS = {
+    'sun':       '☉ Sun',
+    'moon':      '☽ Moon',
+    'mercury':   '☿ Mercury',
+    'venus':     '♀ Venus',
+    'mars':      '♂ Mars',
+    'jupiter':   '♃ Jupiter',
+    'saturn':    '♄ Saturn',
+    'uranus':    '♅ Uranus',
+    'neptune':   '♆ Neptune',
+    'pluto':     '♇ Pluto',
+    'true_node': '☊ True Node',
+    'mean_node': '☊ Mean Node',
+}
 
 # ============================================================
 #  SIDEBAR
@@ -162,6 +200,31 @@ with st.sidebar:
         "Smoothing window (days)", min_value=1, max_value=30, value=7,
         help="Rolling mean window for the smoothed overlay line.")
 
+    # ── NATAL PLANET SELECTOR ─────────────────────────────────
+    st.markdown("### 🌟 Natal Planets to Score")
+    st.caption(
+        "Select which natal planets transits should be scored against. "
+        "All transit × transit aspects are always computed regardless.")
+
+    # We need ephemeris to show positions, so we use a placeholder until loaded.
+    # Store selections in session state.
+    if 'natal_planet_selection' not in st.session_state:
+        st.session_state['natal_planet_selection'] = {p: True for p in EPH_PLANET_COLS}
+
+    natal_planet_checkboxes = {}
+    for p in EPH_PLANET_COLS:
+        label = PLANET_SYMBOLS.get(p, p.replace('_', ' ').title())
+        natal_planet_checkboxes[p] = st.checkbox(
+            label,
+            value=st.session_state['natal_planet_selection'].get(p, True),
+            key=f"natal_cb_{p}")
+
+    # Update session state
+    for p in EPH_PLANET_COLS:
+        st.session_state['natal_planet_selection'][p] = natal_planet_checkboxes[p]
+
+    selected_natal_planets = [p for p in EPH_PLANET_COLS if natal_planet_checkboxes[p]]
+
     st.markdown("---")
     run_btn = st.button("▶  Run Analysis", type="primary")
 
@@ -201,6 +264,10 @@ if end_ts <= start_ts:
     st.error("End date must be after start date.")
     st.stop()
 
+if not selected_natal_planets:
+    st.error("Please select at least one natal planet in the sidebar.")
+    st.stop()
+
 label = person_name.strip() if person_name.strip() else birth_date_input
 today_ts = pd.Timestamp(datetime.date.today())
 
@@ -233,6 +300,12 @@ if end_ts > eph.index[-1]:
     end_ts = eph.index[-1]
     st.warning(f"End date adjusted to ephemeris end: {end_ts.date()}")
 
+# Filter selected natal planets to only those available in ephemeris
+selected_natal_planets = [p for p in selected_natal_planets if p in avail_planets]
+if not selected_natal_planets:
+    st.error("None of the selected natal planets are in the loaded ephemeris.")
+    st.stop()
+
 # ============================================================
 #  NATAL CHART
 # ============================================================
@@ -250,15 +323,25 @@ with st.expander(f"🌟 Natal Chart — {label} ({birth_date_input})", expanded=
         sign    = SIGNS[int(lon // 30)]
         deg_in  = int(lon % 30)
         mins    = int((lon % 1) * 60)
+        is_selected = p in selected_natal_planets
         natal_data.append({
-            'Planet':    p.replace('_',' ').title(),
+            'Selected':  '✓' if is_selected else '',
+            'Planet':    PLANET_SYMBOLS.get(p, p.replace('_',' ').title()),
             'Longitude': f"{lon:.3f}°",
             'Sign':      sign,
             'Position':  f"{deg_in:02d}° {mins:02d}′ {sign}",
-            'Weight':    PLANET_WEIGHT.get(p, 0),
+            'Potency':   PLANET_POTENCY.get(p, 0.5),
+            'Nature':    '+Benefic' if PLANET_NATURE.get(p, 0) > 0
+                         else ('−Malefic' if PLANET_NATURE.get(p, 0) < 0
+                               else 'Neutral'),
         })
     natal_df = pd.DataFrame(natal_data)
     st.dataframe(natal_df, use_container_width=True, hide_index=True)
+
+    if len(selected_natal_planets) < len(avail_planets):
+        st.info(
+            f"Scoring against **{len(selected_natal_planets)}** selected natal planets: "
+            + ", ".join(PLANET_SYMBOLS.get(p, p) for p in selected_natal_planets))
 
 # ============================================================
 #  CORE HELPERS
@@ -271,18 +354,43 @@ def angular_diff(lon_a, lon_b):
 def orb_factor(abs_gap, orb_max):
     return np.clip(1.0 - abs_gap / orb_max, 0.0, 1.0)
 
-def aspect_score_single(pw_a, pw_b, asp, orb_f, phase):
-    magnitude = (abs(pw_a) + abs(pw_b)) / 2.0
+def aspect_score_single(pot_a, pot_b, asp, orb_f, phase, nat_a=0, nat_b=0):
+    """
+    Consistent with trading app scoring:
+      pot_a / pot_b : planet potency (always > 0)
+      nat_a / nat_b : planet nature  (+1 benefic, -1 malefic, 0 neutral)
+      asp           : aspect angle (0, 60, 90, 120, 180)
+      orb_f         : orb proximity factor 0→1
+      phase         : 'apply' or 'sep'
+
+    Conjunction (asp=0):
+      - Direction = sign of (nat_a + nat_b)
+      - Magnitude scales with how strongly both planets share the same nature
+    Other aspects:
+      - Base score from ASPECT_BASE
+      - Nature modulates: same-nature pairs amplify the natural expression
+      - avg_nat > 0 (benefic pair)  → harmonious aspects grow, tense aspects shrink
+      - avg_nat < 0 (malefic pair)  → tense aspects grow, harmonious aspects shrink
+    """
+    avg_pot = (pot_a + pot_b) / 2.0
+    avg_nat = (nat_a + nat_b) / 2.0
+
     if asp == 0:
-        net_polarity = pw_a + pw_b
-        direction    = float(np.sign(net_polarity)) if net_polarity != 0 else 1.0
-        asp_strength = abs(ASPECT_MULT[0])
+        net_nature = nat_a + nat_b
+        if net_nature == 0:
+            return 0.0
+        direction = float(np.sign(net_nature))
+        magnitude = avg_pot * abs(net_nature) / 2.0
+        return direction * magnitude * abs(ASPECT_BASE[0]) * orb_f * PHASE_FACTOR[phase]
     else:
-        direction    = float(np.sign(ASPECT_MULT[asp]))
-        asp_strength = abs(ASPECT_MULT[asp])
-    return direction * magnitude * asp_strength * orb_f * PHASE_FACTOR[phase]
+        base      = ASPECT_BASE[asp]
+        modulated = base * (1.0 + NATURE_MOD * avg_nat * float(np.sign(base)))
+        return modulated * avg_pot * orb_f * PHASE_FACTOR[phase]
 
 def compute_natal_score(date_index):
+    """
+    Scores transit planets against SELECTED natal planets only.
+    """
     eph_a  = eph.reindex(date_index, method='ffill')
     n      = len(date_index)
     scores = np.zeros(n)
@@ -291,20 +399,23 @@ def compute_natal_score(date_index):
         if tp not in eph_a.columns: continue
         t_lons  = eph_a[tp].values.astype(float) % 360
         motion  = np.gradient(np.unwrap(t_lons, period=360))
-        pw_t    = PLANET_WEIGHT.get(tp, 0.0)
-        for np_ in avail_planets:
+        pot_t   = PLANET_POTENCY.get(tp, 0.5)
+        nat_t   = PLANET_NATURE.get(tp, 0)
+        # Only score against selected natal planets
+        for np_ in selected_natal_planets:
             n_lon = natal[np_]
-            pw_n  = PLANET_WEIGHT.get(np_, 0.0)
+            pot_n = PLANET_POTENCY.get(np_, 0.5)
+            nat_n = PLANET_NATURE.get(np_, 0)
             for asp in ASPECTS:
                 target  = (n_lon + asp) % 360
                 gap     = angular_diff(t_lons, target)
                 abs_gap = np.abs(gap)
                 applying = ((motion > 0) & (gap < 0)) | ((motion < 0) & (gap > 0))
-                mask_a   = applying   & (abs_gap <= orb_apply)
+                mask_a   = applying    & (abs_gap <= orb_apply)
                 mask_s   = (~applying) & (abs_gap <= orb_sep)
                 for i in np.where(mask_a)[0]:
                     of = float(orb_factor(abs_gap[i], orb_apply))
-                    sc = aspect_score_single(pw_t, pw_n, asp, of, 'apply')
+                    sc = aspect_score_single(pot_t, pot_n, asp, of, 'apply', nat_t, nat_n)
                     scores[i] += sc
                     detail.append({'date': date_index[i], 'transit': tp,
                                    'natal': np_, 'aspect': ASP_NAMES[asp],
@@ -313,7 +424,7 @@ def compute_natal_score(date_index):
                                    'score': round(sc, 4)})
                 for i in np.where(mask_s)[0]:
                     of = float(orb_factor(abs_gap[i], orb_sep))
-                    sc = aspect_score_single(pw_t, pw_n, asp, of, 'sep')
+                    sc = aspect_score_single(pot_t, pot_n, asp, of, 'sep', nat_t, nat_n)
                     scores[i] += sc
                     detail.append({'date': date_index[i], 'transit': tp,
                                    'natal': np_, 'aspect': ASP_NAMES[asp],
@@ -333,8 +444,10 @@ def compute_transit_score(date_index):
         lon_A   = eph_a[pA].values.astype(float) % 360
         lon_B   = eph_a[pB].values.astype(float) % 360
         motion  = np.gradient(np.unwrap(lon_A, period=360))
-        pw_A    = PLANET_WEIGHT.get(pA, 0.0)
-        pw_B    = PLANET_WEIGHT.get(pB, 0.0)
+        pot_A   = PLANET_POTENCY.get(pA, 0.5)
+        pot_B   = PLANET_POTENCY.get(pB, 0.5)
+        nat_A   = PLANET_NATURE.get(pA, 0)
+        nat_B   = PLANET_NATURE.get(pB, 0)
         for asp in ASPECTS:
             target  = (lon_B + asp) % 360
             gap     = angular_diff(lon_A, target)
@@ -344,7 +457,7 @@ def compute_transit_score(date_index):
             mask_s   = (~applying) & (abs_gap <= orb_sep)
             for i in np.where(mask_a)[0]:
                 of = float(orb_factor(abs_gap[i], orb_apply))
-                sc = aspect_score_single(pw_A, pw_B, asp, of, 'apply')
+                sc = aspect_score_single(pot_A, pot_B, asp, of, 'apply', nat_A, nat_B)
                 scores[i] += sc
                 detail.append({'date': date_index[i], 'planet_a': pA,
                                'planet_b': pB, 'aspect': ASP_NAMES[asp],
@@ -353,7 +466,7 @@ def compute_transit_score(date_index):
                                'score': round(sc, 4)})
             for i in np.where(mask_s)[0]:
                 of = float(orb_factor(abs_gap[i], orb_sep))
-                sc = aspect_score_single(pw_A, pw_B, asp, of, 'sep')
+                sc = aspect_score_single(pot_A, pot_B, asp, of, 'sep', nat_A, nat_B)
                 scores[i] += sc
                 detail.append({'date': date_index[i], 'planet_a': pA,
                                'planet_b': pB, 'aspect': ASP_NAMES[asp],
@@ -366,10 +479,8 @@ def compute_transit_score(date_index):
 #  BUILD DATE INDEX & COMPUTE SCORES
 # ============================================================
 
-# Full daily date index covering the entire display window
 full_index = pd.date_range(start=start_ts, end=end_ts, freq='D')
 
-# Also extend slightly for table (in case end_ts < today + table_future_days)
 table_end_ts = today_ts + pd.Timedelta(days=table_future_days + 3)
 if table_end_ts > end_ts:
     table_ext = pd.date_range(
@@ -390,7 +501,7 @@ natal_scores   = natal_scores_full.reindex(full_index).fillna(0)
 transit_scores = transit_scores_full.reindex(full_index).fillna(0)
 combined_scores = natal_scores.add(transit_scores, fill_value=0)
 
-# Split into history (up to today) and forecast (after today)
+# Split history / forecast
 hist_mask = full_index <= today_ts
 fore_mask = full_index >  today_ts
 
@@ -404,10 +515,14 @@ transit_fore = transit_scores[fore_mask]
 combined_hist = combined_scores[hist_mask]
 combined_fore = combined_scores[fore_mask]
 
-# ── Summary metrics ───────────────────────────────────────────
-today_natal   = float(natal_scores.get(today_ts, natal_scores.iloc[-1 if len(dates_fore)==0 else len(dates_hist)-1]))
-today_transit = float(transit_scores.get(today_ts, transit_scores.iloc[-1 if len(dates_fore)==0 else len(dates_hist)-1]))
+# Summary metrics
+today_natal    = float(natal_scores.get(today_ts, natal_scores.iloc[len(dates_hist)-1]))
+today_transit  = float(transit_scores.get(today_ts, transit_scores.iloc[len(dates_hist)-1]))
 today_combined = today_natal + today_transit
+
+natal_planet_label = (
+    "All planets" if len(selected_natal_planets) == len(avail_planets)
+    else ", ".join(PLANET_SYMBOLS.get(p, p) for p in selected_natal_planets))
 
 st.markdown("---")
 c1, c2, c3, c4 = st.columns(4)
@@ -417,9 +532,7 @@ c2.metric("Today's Transit Score",  f"{today_transit:.2f}",
           delta="▲ Positive" if today_transit > 0 else "▼ Negative")
 c3.metric("Today's Combined Score", f"{today_combined:.2f}",
           delta="▲ Positive" if today_combined > 0 else "▼ Negative")
-c4.metric("Display window",
-          f"{len(full_index)} days",
-          delta=f"{start_ts.date()} → {end_ts.date()}")
+c4.metric("Natal planets scored", f"{len(selected_natal_planets)} / {len(avail_planets)}")
 
 # ============================================================
 #  PLOT HELPERS
@@ -456,7 +569,6 @@ def format_xaxis(ax, n_days):
     ax.set_xlim(start_ts, end_ts + pd.Timedelta(days=2))
 
 def draw_score_bars(ax, dates_h, scores_h, dates_f, scores_f, alpha=0.75):
-    """Draw history bars solid, forecast bars same style (no candles here)."""
     if len(dates_h):
         h_vals   = scores_h.values
         h_colors = [GREEN if v >= 0 else RED for v in h_vals]
@@ -467,7 +579,6 @@ def draw_score_bars(ax, dates_h, scores_h, dates_f, scores_f, alpha=0.75):
         ax.bar(dates_f, f_vals, color=f_colors, alpha=alpha, width=1.0, zorder=3)
 
 def draw_shading(ax, dates_h, scores_h, dates_f, scores_f, alpha_cap, denom):
-    """Background shading — same colour logic, variable opacity by score magnitude."""
     for d, s in zip(dates_h, scores_h.values):
         if s == 0: continue
         ax.axvspan(d, d + pd.Timedelta(days=1),
@@ -498,43 +609,34 @@ n_days = len(full_index)
 st.markdown("---")
 st.markdown("## Chart 1 — Natal Aspect Score")
 st.caption(
-    "Daily score from transit planets aspecting your natal chart. "
-    "Green bars = supportive transits. Red bars = challenging transits.")
+    f"Transit planets aspecting selected natal planets: **{natal_planet_label}**. "
+    "Green = supportive. Red = challenging.")
 
 fig1, ax1 = plt.subplots(figsize=(18, 5), facecolor=BG)
 style_ax(ax1)
 ax1.set_ylabel('Natal Score', fontsize=10)
 draw_zero(ax1)
-
 draw_shading(ax1, dates_hist, natal_hist, dates_fore, natal_fore, 0.18, 15)
 draw_score_bars(ax1, dates_hist, natal_hist, dates_fore, natal_fore)
 draw_smooth_line(ax1, dates_hist, natal_hist, dates_fore, natal_fore, GOLD)
-
-# Fill above/below zero
 if len(dates_hist):
     ax1.fill_between(dates_hist, natal_hist.values, 0,
-                     where=(natal_hist.values >= 0),
-                     color=GREEN, alpha=0.08, zorder=1)
+                     where=(natal_hist.values >= 0), color=GREEN, alpha=0.08, zorder=1)
     ax1.fill_between(dates_hist, natal_hist.values, 0,
-                     where=(natal_hist.values < 0),
-                     color=RED, alpha=0.08, zorder=1)
+                     where=(natal_hist.values < 0),  color=RED,   alpha=0.08, zorder=1)
 if len(dates_fore):
     ax1.fill_between(dates_fore, natal_fore.values, 0,
-                     where=(natal_fore.values >= 0),
-                     color=GREEN, alpha=0.08, zorder=1)
+                     where=(natal_fore.values >= 0), color=GREEN, alpha=0.08, zorder=1)
     ax1.fill_between(dates_fore, natal_fore.values, 0,
-                     where=(natal_fore.values < 0),
-                     color=RED, alpha=0.08, zorder=1)
-
+                     where=(natal_fore.values < 0),  color=RED,   alpha=0.08, zorder=1)
 draw_today_line(ax1)
 format_xaxis(ax1, n_days)
-
 ax1.legend(fontsize=8, facecolor='#1A1A38', labelcolor=WHITE, loc='upper left')
 fig1.suptitle(
-    f"{label}  |  Natal Aspect Score  (Transit × Natal)\n"
+    f"{label}  |  Natal Aspect Score  (Transit × Natal: {natal_planet_label})\n"
     f"Birth: {birth_date_input}  |  Apply≤{orb_apply}°  Sep≤{orb_sep}°  |  "
     f"Green=Supportive  Red=Challenging  |  Gold dashed = Today",
-    color=GOLD, fontsize=11, fontweight='bold')
+    color=GOLD, fontsize=10, fontweight='bold')
 fig1.tight_layout()
 st.pyplot(fig1, use_container_width=True)
 plt.close(fig1)
@@ -545,37 +647,27 @@ plt.close(fig1)
 
 st.markdown("---")
 st.markdown("## Chart 2 — Transit × Transit Aspect Score")
-st.caption(
-    "Daily score from transit planets aspecting each other. "
-    "This reflects the general planetary weather — independent of natal chart.")
+st.caption("General planetary weather — all transit planet pairs, independent of natal chart.")
 
 fig2, ax2 = plt.subplots(figsize=(18, 5), facecolor=BG)
 style_ax(ax2)
 ax2.set_ylabel('Transit Score', fontsize=10)
 draw_zero(ax2)
-
 draw_shading(ax2, dates_hist, transit_hist, dates_fore, transit_fore, 0.18, 25)
 draw_score_bars(ax2, dates_hist, transit_hist, dates_fore, transit_fore)
 draw_smooth_line(ax2, dates_hist, transit_hist, dates_fore, transit_fore, GOLD)
-
 if len(dates_hist):
     ax2.fill_between(dates_hist, transit_hist.values, 0,
-                     where=(transit_hist.values >= 0),
-                     color=GREEN, alpha=0.08, zorder=1)
+                     where=(transit_hist.values >= 0), color=GREEN, alpha=0.08, zorder=1)
     ax2.fill_between(dates_hist, transit_hist.values, 0,
-                     where=(transit_hist.values < 0),
-                     color=RED, alpha=0.08, zorder=1)
+                     where=(transit_hist.values < 0),  color=RED,   alpha=0.08, zorder=1)
 if len(dates_fore):
     ax2.fill_between(dates_fore, transit_fore.values, 0,
-                     where=(transit_fore.values >= 0),
-                     color=GREEN, alpha=0.08, zorder=1)
+                     where=(transit_fore.values >= 0), color=GREEN, alpha=0.08, zorder=1)
     ax2.fill_between(dates_fore, transit_fore.values, 0,
-                     where=(transit_fore.values < 0),
-                     color=RED, alpha=0.08, zorder=1)
-
+                     where=(transit_fore.values < 0),  color=RED,   alpha=0.08, zorder=1)
 draw_today_line(ax2)
 format_xaxis(ax2, n_days)
-
 ax2.legend(fontsize=8, facecolor='#1A1A38', labelcolor=WHITE, loc='upper left')
 fig2.suptitle(
     f"{label}  |  Transit × Transit Aspect Score  (General Planetary Weather)\n"
@@ -593,11 +685,9 @@ plt.close(fig2)
 st.markdown("---")
 st.markdown("## Chart 3 — Cumulative Aspect Score")
 st.caption(
-    "Running total since the display start date. "
-    "Rising = accumulating positive conditions. Falling = accumulating challenges. "
-    "The absolute value is less meaningful than the direction of the trend.")
+    "Running total since display start. Rising = accumulating positive conditions. "
+    "Falling = accumulating challenges. Slope matters more than absolute value.")
 
-# Build cumulative series across the full window (history + forecast seamlessly)
 natal_cum    = natal_scores.cumsum()
 transit_cum  = transit_scores.cumsum()
 combined_cum = combined_scores.cumsum()
@@ -614,7 +704,6 @@ style_ax(ax3)
 ax3.set_ylabel('Cumulative Score', fontsize=10)
 draw_zero(ax3)
 
-# History lines
 if len(dates_hist):
     ax3.plot(dates_hist, natal_cum_h.values,
              color=ORANGE, lw=1.4, ls='--', alpha=0.85, zorder=3, label='Natal cum.')
@@ -623,22 +712,18 @@ if len(dates_hist):
     ax3.plot(dates_hist, combined_cum_h.values,
              color=TEAL, lw=2.4, zorder=4, label='Combined cum.')
     ax3.fill_between(dates_hist, combined_cum_h.values, 0,
-                     where=(combined_cum_h.values >= 0),
-                     color=GREEN, alpha=0.12, zorder=1)
+                     where=(combined_cum_h.values >= 0), color=GREEN, alpha=0.12, zorder=1)
     ax3.fill_between(dates_hist, combined_cum_h.values, 0,
-                     where=(combined_cum_h.values < 0),
-                     color=RED, alpha=0.12, zorder=1)
+                     where=(combined_cum_h.values < 0),  color=RED,   alpha=0.12, zorder=1)
 
-# Forecast lines (continue seamlessly from history)
 if len(dates_fore):
-    # Connector dots at today boundary
     if len(dates_hist):
         conn_dates = [dates_hist[-1], dates_fore[0]]
-        ax3.plot(conn_dates, [natal_cum_h.iloc[-1],   natal_cum_f.iloc[0]],
+        ax3.plot(conn_dates, [natal_cum_h.iloc[-1],    natal_cum_f.iloc[0]],
                  color=ORANGE, lw=1.4, ls='--', alpha=0.5)
-        ax3.plot(conn_dates, [transit_cum_h.iloc[-1], transit_cum_f.iloc[0]],
+        ax3.plot(conn_dates, [transit_cum_h.iloc[-1],  transit_cum_f.iloc[0]],
                  color=PURPLE, lw=1.4, ls='--', alpha=0.5)
-        ax3.plot(conn_dates, [combined_cum_h.iloc[-1],combined_cum_f.iloc[0]],
+        ax3.plot(conn_dates, [combined_cum_h.iloc[-1], combined_cum_f.iloc[0]],
                  color=TEAL, lw=2.4, alpha=0.6)
 
     ax3.plot(dates_fore, natal_cum_f.values,
@@ -648,7 +733,6 @@ if len(dates_fore):
     ax3.plot(dates_fore, combined_cum_f.values,
              color=TEAL, lw=2.4, ls='--', alpha=0.75, zorder=4)
 
-    # Fill forecast zone relative to today's level
     last_val = combined_cum_h.iloc[-1] if len(combined_cum_h) else 0
     ax3.fill_between(dates_fore, combined_cum_f.values, last_val,
                      where=(combined_cum_f.values >= last_val),
@@ -659,7 +743,6 @@ if len(dates_fore):
 
 draw_today_line(ax3)
 format_xaxis(ax3, n_days)
-
 ax3.legend(fontsize=8, facecolor='#1A1A38', labelcolor=WHITE, loc='upper left')
 fig3.suptitle(
     f"{label}  |  Cumulative Aspect Score\n"
@@ -701,6 +784,20 @@ def score_style(val):
         if val < 0: return 'color: #E84040; font-weight: bold'
     return ''
 
+def build_daily_net(raw_win, period_filter):
+    if raw_win.empty:
+        return pd.DataFrame()
+    grp = (raw_win.groupby(['date', 'period'])
+           .agg(Aspects=('score', 'count'), Net_Score=('score', 'sum'))
+           .reset_index().sort_values('date'))
+    grp = grp[grp['period'] == period_filter].copy()
+    if grp.empty:
+        return pd.DataFrame()
+    grp['Bias'] = grp['Net_Score'].apply(lambda x: '▲ Supportive' if x > 0 else '▼ Challenging')
+    grp['date'] = grp['date'].astype(str)
+    grp.columns = ['Date', 'Period', '# Aspects', 'Net Score', 'Bias']
+    return grp[['Date', '# Aspects', 'Net Score', 'Bias']]
+
 st.markdown("---")
 st.markdown("## 📋 Aspect Tables")
 st.caption(
@@ -720,8 +817,10 @@ with tab1:
                 'date':'Date', 'transit':'Transit Planet',
                 'natal':'Natal Planet', 'aspect':'Aspect',
                 'phase':'Phase', 'orb':'Orb°', 'score':'Score'})
-            df['Transit Planet'] = df['Transit Planet'].str.replace('_',' ').str.title()
-            df['Natal Planet']   = df['Natal Planet'].str.replace('_',' ').str.title()
+            df['Transit Planet'] = df['Transit Planet'].apply(
+                lambda x: PLANET_SYMBOLS.get(x, x.replace('_',' ').title()))
+            df['Natal Planet'] = df['Natal Planet'].apply(
+                lambda x: PLANET_SYMBOLS.get(x, x.replace('_',' ').title()))
             cols = ['Date','Transit Planet','Natal Planet','Aspect','Phase','Orb°','Score']
             return df[[c for c in cols if c in df.columns]]
 
@@ -743,17 +842,16 @@ with tab1:
                 prep_natal(fut_n).style.applymap(score_style, subset=['Score']),
                 use_container_width=True, hide_index=True)
 
-        # Daily net
         st.markdown("### 📆 Daily Net Natal Score")
-        dn = (natal_win.groupby(['date','period'])
-              .agg(N=('score','count'), Net=('score','sum'))
-              .reset_index().sort_values('date'))
-        dn['Bias']   = dn['Net'].apply(lambda x: '▲ Supportive' if x > 0 else '▼ Challenging')
-        dn['date']   = dn['date'].astype(str)
-        dn.columns   = ['Date','Period','# Aspects','Net Score','Bias']
-        st.dataframe(
-            dn.style.applymap(score_style, subset=['Net Score']),
-            use_container_width=True, hide_index=True)
+        dn_past = build_daily_net(natal_win, 'Past')
+        dn_fut  = build_daily_net(natal_win, 'Future')
+        dn = pd.concat([dn_past, dn_fut]).reset_index(drop=True) if not dn_past.empty or not dn_fut.empty else pd.DataFrame()
+        if dn.empty:
+            st.info("No daily net data available.")
+        else:
+            st.dataframe(
+                dn.style.applymap(score_style, subset=['Net Score']),
+                use_container_width=True, hide_index=True)
 
 # ── TABLE 2: TRANSIT ASPECTS ──────────────────────────────────
 with tab2:
@@ -765,8 +863,10 @@ with tab2:
             df = sub.rename(columns={
                 'date':'Date', 'planet_a':'Planet A', 'planet_b':'Planet B',
                 'aspect':'Aspect', 'phase':'Phase', 'orb':'Orb°', 'score':'Score'})
-            df['Planet A'] = df['Planet A'].str.replace('_',' ').str.title()
-            df['Planet B'] = df['Planet B'].str.replace('_',' ').str.title()
+            df['Planet A'] = df['Planet A'].apply(
+                lambda x: PLANET_SYMBOLS.get(x, x.replace('_',' ').title()))
+            df['Planet B'] = df['Planet B'].apply(
+                lambda x: PLANET_SYMBOLS.get(x, x.replace('_',' ').title()))
             cols = ['Date','Planet A','Planet B','Aspect','Phase','Orb°','Score']
             return df[[c for c in cols if c in df.columns]]
 
@@ -789,15 +889,15 @@ with tab2:
                 use_container_width=True, hide_index=True)
 
         st.markdown("### 📆 Daily Net Transit Score")
-        dt = (transit_win.groupby(['date','period'])
-              .agg(N=('score','count'), Net=('score','sum'))
-              .reset_index().sort_values('date'))
-        dt['Bias']   = dt['Net'].apply(lambda x: '▲ Supportive' if x > 0 else '▼ Challenging')
-        dt['date']   = dt['date'].astype(str)
-        dt.columns   = ['Date','Period','# Aspects','Net Score','Bias']
-        st.dataframe(
-            dt.style.applymap(score_style, subset=['Net Score']),
-            use_container_width=True, hide_index=True)
+        dt_past = build_daily_net(transit_win, 'Past')
+        dt_fut  = build_daily_net(transit_win, 'Future')
+        dt = pd.concat([dt_past, dt_fut]).reset_index(drop=True) if not dt_past.empty or not dt_fut.empty else pd.DataFrame()
+        if dt.empty:
+            st.info("No daily net data available.")
+        else:
+            st.dataframe(
+                dt.style.applymap(score_style, subset=['Net Score']),
+                use_container_width=True, hide_index=True)
 
 # ============================================================
 #  SCORING LEGEND
@@ -806,37 +906,44 @@ with tab2:
 st.markdown("---")
 with st.expander("📖 Scoring Methodology", expanded=False):
     st.markdown(f"""
-**Score = direction × magnitude × aspect_strength × orb_proximity × phase_factor**
+**Score = modulated_base × avg_potency × orb_proximity × phase_factor**
 
 | Component | Rule |
 |---|---|
-| **direction** | Trine/Sext = +1 (supportive) · Sq/Opp = −1 (challenging) · Conj = sign of planet weight sum |
-| **magnitude** | (\\|Planet A weight\\| + \\|Planet B weight\\|) / 2 |
-| **aspect_strength** | \\|aspect multiplier\\| |
+| **Conjunction** | Direction = sign of (nat_A + nat_B). Both benefic → +, both malefic → −, mixed → 0 |
+| **Other aspects** | Base score × (1 + {NATURE_MOD} × avg_nature × sign(base)). Same-nature pairs amplify natural expression |
 | **orb_proximity** | Linear: 1.0 at exact → 0.0 at orb edge |
-| **phase_factor** | Applying = 1.0 · Separating = {PHASE_FACTOR['sep']} |
+| **phase_factor** | Applying = {PHASE_FACTOR['apply']} · Separating = {PHASE_FACTOR['sep']} |
 
-**Planet Weights:**
+**Planet Potency & Nature:**
 
-| Supportive | Weight | Challenging | Weight |
-|---|---|---|---|
-| Jupiter | +3.0 | Saturn | −2.5 |
-| Venus | +2.0 | Mars | −1.5 |
-| Sun | +1.5 | Pluto | −1.0 |
-| Moon | +1.0 | Uranus | −0.5 |
-| Neptune | +0.5 | | |
-| Mercury | +0.5 | | |
-| North Node | +0.5 | | |
+| Planet | Potency | Nature |
+|---|---|---|
+| ♃ Jupiter | 3.0 | +Benefic |
+| ♀ Venus | 2.0 | +Benefic |
+| ☉ Sun | 1.5 | +Benefic |
+| ☽ Moon | 1.0 | +Benefic |
+| ♆ Neptune | 0.5 | +Benefic |
+| ♄ Saturn | 2.5 | −Malefic |
+| ♂ Mars | 2.0 | −Malefic |
+| ♇ Pluto | 1.5 | −Malefic |
+| ♅ Uranus | 0.5 | −Malefic |
+| ☿ Mercury | 0.5 | Neutral |
+| ☊ Nodes | 0.5 | +Benefic |
 
-**Aspect Multipliers:** Trine +2.0 · Sextile +1.5 · Conjunction ±1.0 · Opposition −1.5 · Square −1.8
+**Aspect Base Scores:** Trine +2.0 · Sextile +1.5 · Conjunction ±variable · Opposition −1.5 · Square −1.8
 
-**How to read the charts:**
-- **Chart 1 (Natal)** — Reflects how current planetary movements interact with *your* unique birth chart.
-  High positive score = transiting benefics making harmonious angles to your natal planets.
-- **Chart 2 (Transit)** — The general planetary weather affecting everyone.
-  Peaks and troughs here are shared across all people born in any era.
-- **Chart 3 (Cumulative)** — The running total. A rising teal line means conditions are improving;
-  falling means accumulating challenges. The *slope* matters more than the absolute value.
-- **Orb settings:** Apply={orb_apply}°  Sep={orb_sep}°  — Applying aspects (planet approaching exact)
-  score at full weight; separating aspects score at {PHASE_FACTOR['sep']:.0%} weight.
+**Nature Modulation (NATURE_MOD = {NATURE_MOD}):**
+- Two benefics making a trine → score amplified by {NATURE_MOD*100:.0f}%
+- Two malefics making a square → tense score amplified by {NATURE_MOD*100:.0f}%
+- Mixed pair → no amplification, base score unchanged
+
+**Natal planet filter:** Scoring currently uses natal: **{natal_planet_label}**
+
+**How to read:**
+- **Chart 1 (Natal)** — How current transits interact with your specific birth planets.
+  Select fewer natal planets to isolate specific themes (e.g. only Jupiter + Saturn for luck/restriction cycle).
+- **Chart 2 (Transit)** — General planetary weather affecting everyone.
+- **Chart 3 (Cumulative)** — Running total. Rising slope = improving conditions; falling = accumulating challenges.
+- **Orb settings:** Apply={orb_apply}°  Sep={orb_sep}° — Applying aspects score at full weight; separating at {PHASE_FACTOR['sep']:.0%}.
     """)
