@@ -225,6 +225,28 @@ with st.sidebar:
 
     selected_natal_planets = [p for p in EPH_PLANET_COLS if natal_planet_checkboxes[p]]
 
+    # ── TRANSIT PLANET SELECTOR ───────────────────────────────
+    st.markdown("### 🔄 Transit Planets to Use")
+    st.caption(
+        "Select which transiting planets are included in aspect calculations. "
+        "Affects both natal and transit × transit scoring.")
+
+    if 'transit_planet_selection' not in st.session_state:
+        st.session_state['transit_planet_selection'] = {p: True for p in EPH_PLANET_COLS}
+
+    transit_planet_checkboxes = {}
+    for p in EPH_PLANET_COLS:
+        label = PLANET_SYMBOLS.get(p, p.replace('_', ' ').title())
+        transit_planet_checkboxes[p] = st.checkbox(
+            label,
+            value=st.session_state['transit_planet_selection'].get(p, True),
+            key=f"transit_cb_{p}")
+
+    for p in EPH_PLANET_COLS:
+        st.session_state['transit_planet_selection'][p] = transit_planet_checkboxes[p]
+
+    selected_transit_planets = [p for p in EPH_PLANET_COLS if transit_planet_checkboxes[p]]
+
     st.markdown("---")
     run_btn = st.button("▶  Run Analysis", type="primary")
 
@@ -268,6 +290,10 @@ if not selected_natal_planets:
     st.error("Please select at least one natal planet in the sidebar.")
     st.stop()
 
+if not selected_transit_planets:
+    st.error("Please select at least one transit planet in the sidebar.")
+    st.stop()
+
 label = person_name.strip() if person_name.strip() else birth_date_input
 today_ts = pd.Timestamp(datetime.date.today())
 
@@ -306,6 +332,12 @@ if not selected_natal_planets:
     st.error("None of the selected natal planets are in the loaded ephemeris.")
     st.stop()
 
+# Filter selected transit planets to only those available in ephemeris
+selected_transit_planets = [p for p in selected_transit_planets if p in avail_planets]
+if not selected_transit_planets:
+    st.error("None of the selected transit planets are in the loaded ephemeris.")
+    st.stop()
+
 # ============================================================
 #  NATAL CHART
 # ============================================================
@@ -338,10 +370,10 @@ with st.expander(f"🌟 Natal Chart — {label} ({birth_date_input})", expanded=
     natal_df = pd.DataFrame(natal_data)
     st.dataframe(natal_df, use_container_width=True, hide_index=True)
 
-    if len(selected_natal_planets) < len(avail_planets):
+    if len(selected_natal_planets) < len(avail_planets) or len(selected_transit_planets) < len(avail_planets):
         st.info(
-            f"Scoring against **{len(selected_natal_planets)}** selected natal planets: "
-            + ", ".join(PLANET_SYMBOLS.get(p, p) for p in selected_natal_planets))
+            f"Natal planets scored: **{', '.join(PLANET_SYMBOLS.get(p, p) for p in selected_natal_planets)}**  \n"
+            f"Transit planets used: **{', '.join(PLANET_SYMBOLS.get(p, p) for p in selected_transit_planets)}**")
 
 # ============================================================
 #  CORE HELPERS
@@ -389,13 +421,13 @@ def aspect_score_single(pot_a, pot_b, asp, orb_f, phase, nat_a=0, nat_b=0):
 
 def compute_natal_score(date_index):
     """
-    Scores transit planets against SELECTED natal planets only.
+    Scores SELECTED transit planets against SELECTED natal planets only.
     """
     eph_a  = eph.reindex(date_index, method='ffill')
     n      = len(date_index)
     scores = np.zeros(n)
     detail = []
-    for tp in avail_planets:
+    for tp in selected_transit_planets:          # ← filtered
         if tp not in eph_a.columns: continue
         t_lons  = eph_a[tp].values.astype(float) % 360
         motion  = np.gradient(np.unwrap(t_lons, period=360))
@@ -438,7 +470,7 @@ def compute_transit_score(date_index):
     n      = len(date_index)
     scores = np.zeros(n)
     detail = []
-    pairs  = list(itertools.combinations(avail_planets, 2))
+    pairs  = list(itertools.combinations(selected_transit_planets, 2))  # ← filtered
     for (pA, pB) in pairs:
         if pA not in eph_a.columns or pB not in eph_a.columns: continue
         lon_A   = eph_a[pA].values.astype(float) % 360
@@ -524,6 +556,10 @@ natal_planet_label = (
     "All planets" if len(selected_natal_planets) == len(avail_planets)
     else ", ".join(PLANET_SYMBOLS.get(p, p) for p in selected_natal_planets))
 
+transit_planet_label = (
+    "All planets" if len(selected_transit_planets) == len(avail_planets)
+    else ", ".join(PLANET_SYMBOLS.get(p, p) for p in selected_transit_planets))
+
 st.markdown("---")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Today's Natal Score",    f"{today_natal:.2f}",
@@ -532,7 +568,9 @@ c2.metric("Today's Transit Score",  f"{today_transit:.2f}",
           delta="▲ Positive" if today_transit > 0 else "▼ Negative")
 c3.metric("Today's Combined Score", f"{today_combined:.2f}",
           delta="▲ Positive" if today_combined > 0 else "▼ Negative")
-c4.metric("Natal planets scored", f"{len(selected_natal_planets)} / {len(avail_planets)}")
+c4.metric("Planet filters",
+          f"N:{len(selected_natal_planets)} / T:{len(selected_transit_planets)}",
+          delta=f"of {len(avail_planets)} available")
 
 # ============================================================
 #  PLOT HELPERS
@@ -609,7 +647,7 @@ n_days = len(full_index)
 st.markdown("---")
 st.markdown("## Chart 1 — Natal Aspect Score")
 st.caption(
-    f"Transit planets aspecting selected natal planets: **{natal_planet_label}**. "
+    f"Transit planets: **{transit_planet_label}** aspecting natal planets: **{natal_planet_label}**. "
     "Green = supportive. Red = challenging.")
 
 fig1, ax1 = plt.subplots(figsize=(18, 5), facecolor=BG)
@@ -633,7 +671,8 @@ draw_today_line(ax1)
 format_xaxis(ax1, n_days)
 ax1.legend(fontsize=8, facecolor='#1A1A38', labelcolor=WHITE, loc='upper left')
 fig1.suptitle(
-    f"{label}  |  Natal Aspect Score  (Transit × Natal: {natal_planet_label})\n"
+    f"{label}  |  Natal Aspect Score\n"
+    f"Transit: {transit_planet_label}  →  Natal: {natal_planet_label}\n"
     f"Birth: {birth_date_input}  |  Apply≤{orb_apply}°  Sep≤{orb_sep}°  |  "
     f"Green=Supportive  Red=Challenging  |  Gold dashed = Today",
     color=GOLD, fontsize=10, fontweight='bold')
@@ -647,7 +686,7 @@ plt.close(fig1)
 
 st.markdown("---")
 st.markdown("## Chart 2 — Transit × Transit Aspect Score")
-st.caption("General planetary weather — all transit planet pairs, independent of natal chart.")
+st.caption(f"Transit pairs from: **{transit_planet_label}**. Independent of natal chart.")
 
 fig2, ax2 = plt.subplots(figsize=(18, 5), facecolor=BG)
 style_ax(ax2)
@@ -670,7 +709,8 @@ draw_today_line(ax2)
 format_xaxis(ax2, n_days)
 ax2.legend(fontsize=8, facecolor='#1A1A38', labelcolor=WHITE, loc='upper left')
 fig2.suptitle(
-    f"{label}  |  Transit × Transit Aspect Score  (General Planetary Weather)\n"
+    f"{label}  |  Transit × Transit Aspect Score\n"
+    f"Planets: {transit_planet_label}  |  "
     f"Apply≤{orb_apply}°  Sep≤{orb_sep}°  |  "
     f"Green=Supportive  Red=Challenging  |  Gold dashed = Today",
     color=GOLD, fontsize=11, fontweight='bold')
@@ -938,7 +978,9 @@ with st.expander("📖 Scoring Methodology", expanded=False):
 - Two malefics making a square → tense score amplified by {NATURE_MOD*100:.0f}%
 - Mixed pair → no amplification, base score unchanged
 
-**Natal planet filter:** Scoring currently uses natal: **{natal_planet_label}**
+**Active filters:**
+- Natal planets: **{natal_planet_label}**
+- Transit planets: **{transit_planet_label}**
 
 **How to read:**
 - **Chart 1 (Natal)** — How current transits interact with your specific birth planets.
