@@ -116,8 +116,9 @@ PLANET_NATURE = {
 }
 
 # Base aspect polarity: positive = harmonious, negative = tense
+# Conjunction = 1.0 (neutral strength — direction decided entirely by planet nature)
 ASPECT_BASE = {
-    0:    0.0,
+    0:   +1.0,
     60:  +1.5,
     90:  -1.8,
     120: +2.0,
@@ -413,7 +414,7 @@ def aspect_score_single(pot_a, pot_b, asp, orb_f, phase, nat_a=0, nat_b=0):
             return 0.0
         direction = float(np.sign(net_nature))
         magnitude = avg_pot * abs(net_nature) / 2.0
-        return direction * magnitude * abs(ASPECT_BASE[0]) * orb_f * PHASE_FACTOR[phase]
+        return direction * magnitude * ASPECT_BASE[0] * orb_f * PHASE_FACTOR[phase]
     else:
         base      = ASPECT_BASE[asp]
         modulated = base * (1.0 + NATURE_MOD * avg_nat * float(np.sign(base)))
@@ -971,7 +972,7 @@ with st.expander("📖 Scoring Methodology", expanded=False):
 | ☿ Mercury | 0.5 | Neutral |
 | ☊ Nodes | 0.5 | +Benefic |
 
-**Aspect Base Scores:** Trine +2.0 · Sextile +1.5 · Conjunction ±variable · Opposition −1.5 · Square −1.8
+**Aspect Base Scores:** Trine +2.0 · Sextile +1.5 · Conjunction ±1.0 · Opposition −1.5 · Square −1.8
 
 **Nature Modulation (NATURE_MOD = {NATURE_MOD}):**
 - Two benefics making a trine → score amplified by {NATURE_MOD*100:.0f}%
