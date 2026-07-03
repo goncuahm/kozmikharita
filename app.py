@@ -548,7 +548,7 @@ def draw_today_line(ax):
         ylims = ax.get_ylim()
         ax.text(today_ts, ylims[1], ' Today', color=GOLD, fontsize=8,
                 va='top', ha='left', fontweight='bold')
-
+        
 def format_xaxis(ax, n_days):
     if n_days <= 30:
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
@@ -556,20 +556,35 @@ def format_xaxis(ax, n_days):
     elif n_days <= 90:
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
         ax.xaxis.set_major_locator(mdates.DayLocator(interval=3))
-    elif n_days <= 180:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0, interval=1))
-    elif n_days <= 365:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d\n%Y'))
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0, interval=2))
-    elif n_days <= 730:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d\n%Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     else:
+        # Every month labeled, regardless of how long the range is
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=60, ha='right', fontsize=7)
     ax.set_xlim(start_ts, end_ts + pd.Timedelta(days=2))
+    
+# def format_xaxis(ax, n_days):
+#     if n_days <= 30:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+#         ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+#     elif n_days <= 90:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+#         ax.xaxis.set_major_locator(mdates.DayLocator(interval=3))
+#     elif n_days <= 180:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+#         ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0, interval=1))
+#     elif n_days <= 365:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d\n%Y'))
+#         ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0, interval=2))
+#     elif n_days <= 730:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d\n%Y'))
+#         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+#     else:
+#         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+#         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+#     plt.setp(ax.xaxis.get_majorticklabels(), rotation=60, ha='right', fontsize=7)
+#     ax.set_xlim(start_ts, end_ts + pd.Timedelta(days=2))
 
 def draw_score_bars(ax, dates_h, scores_h, dates_f, scores_f, alpha=0.75):
     if len(dates_h):
