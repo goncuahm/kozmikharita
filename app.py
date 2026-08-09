@@ -179,7 +179,7 @@ with st.sidebar:
     st.markdown("### 📅 Display Range")
     display_start = st.text_input(
         "Start date (YYYY-MM-DD)",
-        value=(datetime.date.today() - datetime.timedelta(days=365)).strftime("%Y-%m-%d"))
+        value=(datetime.date.today() - datetime.timedelta(days=60)).strftime("%Y-%m-%d"))
     display_end = st.text_input(
         "End date / forecast to (YYYY-MM-DD)",
         value=(datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y-%m-%d"))
