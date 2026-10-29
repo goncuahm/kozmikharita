@@ -391,6 +391,13 @@ def angular_diff(lon_a, lon_b):
     d = (lon_a - lon_b) % 360
     return np.where(d > 180, d - 360, d)
 
+def aspect_offsets(asp):
+    """Angular offsets at which an aspect is exact. Conjunction (0) and
+    opposition (180) have one target; sextile, square and trine form on both sides."""
+    return [asp] if asp in (0, 180) else [asp, -asp]
+
+NODE_PAIR = {'true_node', 'mean_node'}
+
 def orb_factor(abs_gap, orb_max):
     return np.clip(1.0 - abs_gap / orb_max, 0.0, 1.0)
 
@@ -424,9 +431,13 @@ def compute_natal_score(date_index):
             pot_n = PLANET_POTENCY.get(np_, 0.5)
             nat_n = PLANET_NATURE.get(np_, 0)
             for asp in ASPECTS:
-                target   = (n_lon + asp) % 360
+              # FIX 1: sextile, square and trine can form on either side of the
+              # natal point (natal + asp or natal - asp); check both targets.
+              for side in aspect_offsets(asp):
+                target   = (n_lon + side) % 360
                 gap      = angular_diff(t_lons, target)
                 abs_gap  = np.abs(gap)
+                # The natal point is fixed, so the transit planet's own motion decides applying.
                 applying = ((motion > 0) & (gap < 0)) | ((motion < 0) & (gap > 0))
                 mask_a   = applying    & (abs_gap <= orb_apply)
                 mask_s   = (~applying) & (abs_gap <= orb_sep)
@@ -454,13 +465,21 @@ def compute_transit_score(date_index):
     pairs  = list(itertools.combinations(selected_transit_planets, 2))
     for (pA, pB) in pairs:
         if pA not in eph_a.columns or pB not in eph_a.columns: continue
+        # FIX 3: true node and mean node are the same point (always within ~2 deg),
+        # so their permanent "conjunction" is not an aspect and must not be scored.
+        if {pA, pB} == NODE_PAIR: continue
         lon_A    = eph_a[pA].values.astype(float) % 360
         lon_B    = eph_a[pB].values.astype(float) % 360
-        motion   = np.gradient(np.unwrap(lon_A, period=360))
+        # FIX 2: both planets move, so applying/separating depends on their
+        # RELATIVE motion (speed of A minus speed of B), not on A's motion alone.
+        motion   = (np.gradient(np.unwrap(lon_A, period=360))
+                    - np.gradient(np.unwrap(lon_B, period=360)))
         pot_A, nat_A = PLANET_POTENCY.get(pA, 0.5), PLANET_NATURE.get(pA, 0)
         pot_B, nat_B = PLANET_POTENCY.get(pB, 0.5), PLANET_NATURE.get(pB, 0)
         for asp in ASPECTS:
-            target   = (lon_B + asp) % 360
+          # FIX 1: check both sides (B + asp and B - asp) for sextile, square, trine.
+          for side in aspect_offsets(asp):
+            target   = (lon_B + side) % 360
             gap      = angular_diff(lon_A, target)
             abs_gap  = np.abs(gap)
             applying = ((motion > 0) & (gap < 0)) | ((motion < 0) & (gap > 0))
