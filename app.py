@@ -59,12 +59,18 @@ st.markdown("""
 
 GITHUB_EPH_URL = (
     "https://raw.githubusercontent.com/"
-    "goncuahm/kozmikharita/main/planet_degrees.csv"
+    "goncuahm/kozmikharita/main/ephemeris.csv.gz"
 )
 
 @st.cache_data(show_spinner="Loading ephemeris from GitHub …")
 def load_ephemeris(url):
+    # pandas decompresses .csv.gz automatically (compression inferred from the extension)
     eph_raw = pd.read_csv(url, index_col='date', parse_dates=True)
+    # ephemeris.csv stores longitudes as '<planet>_lon' (sun_lon, moon_lon, ...);
+    # keep only those and rename them to the planet names the app uses.
+    if 'sun' not in eph_raw.columns and 'sun_lon' in eph_raw.columns:
+        lon_cols = {f'{p}_lon': p for p in EPH_PLANET_COLS if f'{p}_lon' in eph_raw.columns}
+        eph_raw = eph_raw[list(lon_cols)].rename(columns=lon_cols)
     return eph_raw
 
 # ============================================================
